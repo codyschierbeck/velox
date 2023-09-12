@@ -314,6 +314,32 @@ TEST_F(StringTest, decodeUTF8){
 
 }
 
+TEST_F(StringTest, encodeASCII) {
+    // Input: ASCII encoded "Hello"
+    std::vector<std::int64_t> inputBytes = {72, 101, 108, 108, 111};  // 'H', 'e', 'l', 'l', 'o'
+
+    auto optResult = encode(inputBytes, "us-ascii");
+
+    // Check if optional contains a value
+    ASSERT_TRUE(optResult.has_value());
+
+    // Extract the value from the optional
+    std::string result = optResult.value();
+
+    // Expected: "Hello"
+    std::string expected = "Hello";
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST_F(StringTest, decodeASCII){
+    std::string input = "Hello";
+    std::vector<std::int64_t> expected = {72, 101, 108, 108, 111};  // 'H', 'e', 'l', 'l', 'o'
+
+    EXPECT_EQ(decode(input, "us-ascii", expected), true);
+}
+
+
 
 TEST_F(StringTest, LengthString) {
   EXPECT_EQ(length(""), 0);

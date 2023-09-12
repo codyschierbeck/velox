@@ -83,14 +83,18 @@ enum class Charset {
 };
 
 Charset stringToCharset(const folly::StringPiece format) {
-  if (format == "utf-8") return Charset::UTF_8;
-  if (format == "US-ASCII") return Charset::US_ASCII;
-  if (format == "ISO-8859-1") return Charset::ISO_8859_1;
-  if (format == "UTF-16BE") return Charset::UTF_16BE;
-  if (format == "UTF-16LE") return Charset::UTF_16LE;
-  if (format == "UTF-16") return Charset::UTF_16;
+  std::string lowercaseFormat = format.toString();
+  std::transform(lowercaseFormat.begin(), lowercaseFormat.end(), lowercaseFormat.begin(), ::tolower);
+
+  if (lowercaseFormat == "utf-8") return Charset::UTF_8;
+  if (lowercaseFormat == "us-ascii") return Charset::US_ASCII;
+  if (lowercaseFormat == "iso-8859-1") return Charset::ISO_8859_1;
+  if (lowercaseFormat == "utf-16be") return Charset::UTF_16BE;
+  if (lowercaseFormat == "utf-16le") return Charset::UTF_16LE;
+  if (lowercaseFormat == "utf-16") return Charset::UTF_16;
   return Charset::UNKNOWN;
 }
+
 
 
 std::string encodeBytes(
@@ -104,24 +108,37 @@ std::string encodeBytes(
         }
         return result;
       }
-     case Charset::US_ASCII:
-      // ... handle US-ASCII ...
-      break;
-    case Charset::ISO_8859_1:
-      // ... handle ISO-8859-1 ...
-      break;
-    case Charset::UTF_16BE:
-      break;
-    case Charset::UTF_16LE:
-      break;
-    case Charset::UTF_16: {
-      break;
-    }
-    default:
-      break;
+      case Charset::US_ASCII: {
+        std::string result;
+        for(int64_t byte : bytes) {
+          // Check if byte is within valid ASCII range
+          if (byte < 0 || byte > 127) {
+            // handle invalid ASCII byte (you can throw an error or return some specific string)
+            return "Invalid ASCII byte value";
+          }
+          result.push_back(static_cast<char>(byte));
+        }
+        return result;
+      }
+      case Charset::ISO_8859_1:
+        // ... handle ISO-8859-1 ...
+        break;
+      case Charset::UTF_16BE:
+        // ... handle UTF-16BE ...
+        break;
+      case Charset::UTF_16LE:
+        // ... handle UTF-16LE ...
+        break;
+      case Charset::UTF_16: {
+        // ... handle UTF-16 ...
+        break;
+      }
+      default:
+        break;
     }
     return "Fail";
   }
+
 
 std::vector<int64_t> decodeString(
   std::string input,
@@ -136,7 +153,11 @@ std::vector<int64_t> decodeString(
         break;
       }
       case Charset::US_ASCII:
-        // ... handle US-ASCII ...
+        for(char c : input) {
+          if (c <= 127) {
+            result.push_back(static_cast<int64_t>(c));
+          }
+        }
         break;
       case Charset::ISO_8859_1:
         // ... handle ISO-8859-1 ...
