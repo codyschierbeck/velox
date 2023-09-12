@@ -16,6 +16,8 @@
 #include "velox/expression/VectorFunction.h"
 #include "velox/functions/lib/StringEncodingUtils.h"
 #include "velox/functions/lib/string/StringCore.h"
+#include "velox/expression/VectorReaders.h"
+#include "velox/expression/VectorWriters.h"
 
 namespace facebook::velox::functions::sparksql {
 
@@ -67,6 +69,162 @@ class Instr : public exec::VectorFunction {
         output->set(row, instr<false>(h, n));
       });
     }
+  }
+};
+
+enum class Charset {
+  UTF_8,
+  US_ASCII,
+  ISO_8859_1,
+  UTF_16BE,
+  UTF_16LE,
+  UTF_16,
+  UNKNOWN
+};
+
+Charset stringToCharset(const folly::StringPiece format) {
+  if (format == "utf-8") return Charset::UTF_8;
+  if (format == "US-ASCII") return Charset::US_ASCII;
+  if (format == "ISO-8859-1") return Charset::ISO_8859_1;
+  if (format == "UTF-16BE") return Charset::UTF_16BE;
+  if (format == "UTF-16LE") return Charset::UTF_16LE;
+  if (format == "UTF-16") return Charset::UTF_16;
+  return Charset::UNKNOWN;
+}
+
+
+std::string encodeBytes(
+  std::vector<int64_t> bytes,
+  Charset format) {
+    switch (format){
+      case Charset::UTF_8: {
+        std::string result;
+        for(int64_t byte : bytes) {
+          result.push_back(static_cast<char>(byte));
+        }
+        return result;
+      }
+     case Charset::US_ASCII:
+      // ... handle US-ASCII ...
+      break;
+    case Charset::ISO_8859_1:
+      // ... handle ISO-8859-1 ...
+      break;
+    case Charset::UTF_16BE:
+      break;
+    case Charset::UTF_16LE:
+      break;
+    case Charset::UTF_16: {
+      break;
+    }
+    default:
+      break;
+    }
+    return "Fail";
+  }
+
+std::vector<int64_t> decodeString(
+  std::string input,
+  Charset format) {
+    std::vector<int64_t> result;
+
+    switch (format) {
+      case Charset::UTF_8: {
+        for(char c : input) {
+          result.push_back(static_cast<int64_t>(c));
+        }
+        break;
+      }
+      case Charset::US_ASCII:
+        // ... handle US-ASCII ...
+        break;
+      case Charset::ISO_8859_1:
+        // ... handle ISO-8859-1 ...
+        break;
+      case Charset::UTF_16BE:
+        // ... handle UTF-16BE ...
+        break;
+      case Charset::UTF_16LE:
+        // ... handle UTF-16LE ...
+        break;
+      case Charset::UTF_16:
+        // ... handle UTF-16 ...
+        break;
+      default:
+        // ... handle other charsets or raise an error ...
+        break;
+    }
+
+    return result;
+}
+
+
+template <bool encode>
+class CharsetConverter : public exec::VectorFunction {
+  // ... similar override methods to ensure string encoding ...
+
+  void apply(
+      const SelectivityVector& selected,
+      std::vector<VectorPtr>& args,
+      const TypePtr& /* outputType */,
+      exec::EvalCtx& context,
+      VectorPtr& result) const override {
+
+    VELOX_CHECK_EQ(args.size(), 2);
+    VELOX_CHECK(
+        args[0]->typeKind() == TypeKind::VARCHAR ||
+        args[0]->typeKind() == TypeKind::ARRAY);
+    VELOX_CHECK_EQ(args[1]->typeKind(), TypeKind::VARCHAR);
+
+    DecodedVector decoded;
+    decoded.decode(*args[0], selected);
+
+    exec::LocalDecodedVector input(context, *args[0], selected);
+    exec::LocalDecodedVector format(context, *args[1], selected);
+    auto fStr = format->valueAt<StringView>(0);
+    Charset f  = stringToCharset(fStr);
+
+    if (!encode){
+      context.ensureWritable(selected, ARRAY(BIGINT()), result);
+      exec::VectorWriter<Array<int64_t>> resultWriter;
+      resultWriter.init(*result->as<ArrayVector>());
+      selected.applyToSelected([&](vector_size_t row) {
+        resultWriter.setOffset(row);
+        auto& arrayWriter = resultWriter.current();
+        const StringView& current = input->valueAt<StringView>(row);
+        std::string strValue = current.getString();
+        std::vector<int64_t> bytes = decodeString(current, f);
+        for (auto byte : bytes) {
+          arrayWriter.push_back(byte);
+        }
+        // Indicate writing for the row is done
+        resultWriter.commit();
+      });
+      // Indicate writing for the vector is done
+      resultWriter.finish();
+    } else {
+      context.ensureWritable(selected, VARCHAR(), result);
+      // The native type of VARBINARY is also a StringView
+      auto* output = result->as<FlatVector<StringView>>();
+      exec::VectorReader<Array<int64_t>> reader(&decoded);
+      std::vector<int64_t> bytes = {};
+      selected.applyToSelected([&](vector_size_t row) {
+        if (reader.isSet(row) == false){
+          return;
+        }
+        auto arrayView = reader[row];
+        for (const auto& container : arrayView) {
+          if (container.has_value()){
+            bytes.push_back(container.value());
+          }
+        }
+        std::string ans = encodeBytes(bytes, f);
+        const StringView& answerStringView = StringView(ans.c_str());
+        output->set(row, answerStringView);
+      });
+    }
+
+
   }
 };
 
@@ -151,6 +309,57 @@ void encodeDigestToBase16(uint8_t* output, int digestSize) {
     output[i * 2] = kHexCodes[(digestChar >> 4) & 0xf];
     output[i * 2 + 1] = kHexCodes[digestChar & 0xf];
   }
+}
+
+std::vector<std::shared_ptr<exec::FunctionSignature>> encodeSignatures() {
+  return {
+    exec::FunctionSignatureBuilder()
+    .returnType("VARCHAR")
+    .argumentType("array(bigint)")
+    .argumentType("VARCHAR")
+    .build(),
+  };
+}
+std::vector<std::shared_ptr<exec::FunctionSignature>> decodeSignatures() {
+  return {
+      exec::FunctionSignatureBuilder()
+      .returnType("array(bigint)")
+      .argumentType("VARCHAR")
+      .argumentType("VARCHAR")
+      .build(),
+  };
+}
+
+template <bool encode>
+std::shared_ptr<exec::VectorFunction> makeCharsetConvert(
+  const std::string& name,
+  const std::vector<exec::VectorFunctionArg>& inputArgs,
+  const core::QueryConfig& /*config*/){
+    static const auto charsetConvertFunction = std::make_shared<CharsetConverter<encode>>();
+    return charsetConvertFunction;
+}
+
+// template std::shared_ptr<exec::VectorFunction> makeCharsetConvert<true>(
+//   const std::string& name,
+//   const std::vector<exec::VectorFunctionArg>& inputArgs,
+//   const core::QueryConfig& config);
+// template std::shared_ptr<exec::VectorFunction> makeCharsetConvert<false>(
+//   const std::string& name,
+//   const std::vector<exec::VectorFunctionArg>& inputArgs,
+//   const core::QueryConfig& config);
+
+
+std::shared_ptr<exec::VectorFunction> makeEncode(
+  const std::string& name,
+  const std::vector<exec::VectorFunctionArg>& inputArgs,
+  const core::QueryConfig& config){
+    return makeCharsetConvert<true>(name, inputArgs, config);
+}
+std::shared_ptr<exec::VectorFunction> makeDecode(
+  const std::string& name,
+  const std::vector<exec::VectorFunctionArg>& inputArgs,
+  const core::QueryConfig& config){
+    return makeCharsetConvert<false>(name, inputArgs, config);
 }
 
 } // namespace facebook::velox::functions::sparksql

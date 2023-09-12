@@ -17,6 +17,8 @@
 #include "velox/type/Type.h"
 
 #include <stdint.h>
+#include <vector/tests/utils/VectorTestBase.h>
+#include <cstdint>
 
 namespace facebook::velox::functions::sparksql::test {
 namespace {
@@ -39,6 +41,47 @@ class StringTest : public SparkFunctionBaseTest {
       std::optional<std::string> haystack,
       std::optional<std::string> needle) {
     return evaluateOnce<int32_t>("instr(c0, c1)", haystack, needle);
+  }
+
+  std::optional<std::string> encode(
+    std::optional<std::vector<std::int64_t>> binary,
+    std::optional<std::string> format) {
+
+    if (!binary) {
+        return std::nullopt;
+    }
+
+    VectorPtr arrayVector = makeArrayVector<int64_t>({*binary});
+
+    std::string formatStr;
+    if(format) {
+        formatStr = fmt::format("encode(c0, '{}')", *format);
+    } else {
+        formatStr = "encode(c0, 'default_format')";
+    }
+    auto rowVector = makeRowVector({arrayVector});
+
+    return evaluateOnce<std::string>(formatStr, rowVector);
+  }
+
+  bool decode(
+      std::optional<std::string> input,
+      std::optional<std::string> format,
+      std::optional<std::vector<std::int64_t>> binary) {
+    if (!input) {
+      return false;
+    }
+    auto vector = makeFlatVector<std::string>({*input});
+    const std::string& expr = fmt::format("decode(c0, '{}')", *format);
+    auto result =  evaluate<ArrayVector>(expr, makeRowVector({vector}));
+    if (!binary) {
+        return false;
+    }
+
+    VectorPtr arrayVector = makeArrayVector<int64_t>({*binary});
+    ::facebook::velox::test::assertEqualVectors(arrayVector, result);
+
+    return true;
   }
 
   std::optional<int32_t> length(std::optional<std::string> arg) {
@@ -243,6 +286,34 @@ TEST_F(StringTest, Instr) {
       instr(std::string(kWomanFacepalmingLightSkinTone) + "abc😋def", "def"),
       10);
 }
+
+
+TEST_F(StringTest, encodeUTF8) {
+    // Input: UTF-8 encoded "大千世界"
+    std::vector<std::int64_t> inputBytes = {-27, -92, -89, -27, -115, -125, -28, -72, -106, -25, -107, -116};
+
+    auto optResult = encode(inputBytes, "utf-8");
+
+    // Check if optional contains a value
+    ASSERT_TRUE(optResult.has_value());
+
+    // Extract the value from the optional
+    std::string result = optResult.value();
+
+    // Expected: "大千世界"
+    std::string expected = "大千世界";
+
+    EXPECT_EQ(result, expected);
+}
+
+TEST_F(StringTest, decodeUTF8){
+  std::string input =  "大千世界";
+  std::vector<std::int64_t> expected = {-27, -92, -89, -27, -115, -125, -28, -72, -106, -25, -107, -116};
+
+  EXPECT_EQ(decode(input, "utf-8", expected), true);
+
+}
+
 
 TEST_F(StringTest, LengthString) {
   EXPECT_EQ(length(""), 0);

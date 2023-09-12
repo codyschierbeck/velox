@@ -118,6 +118,10 @@ void registerFunctions(const std::string& prefix) {
   exec::registerStatefulVectorFunction(
       prefix + "instr", instrSignatures(), makeInstr);
   exec::registerStatefulVectorFunction(
+      prefix + "encode", encodeSignatures(), makeEncode);
+  exec::registerStatefulVectorFunction(
+      prefix + "decode", decodeSignatures(), makeDecode);
+  exec::registerStatefulVectorFunction(
       prefix + "length", lengthSignatures(), makeLength);
 
   registerFunction<Md5Function, Varchar, Varbinary>({prefix + "md5"});
