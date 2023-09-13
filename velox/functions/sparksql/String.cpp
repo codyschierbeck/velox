@@ -18,6 +18,7 @@
 #include "velox/functions/lib/string/StringCore.h"
 #include "velox/expression/VectorReaders.h"
 #include "velox/expression/VectorWriters.h"
+#include <iconv.h>
 
 namespace facebook::velox::functions::sparksql {
 
@@ -117,11 +118,31 @@ std::string decodeBytes(
           }
           result.push_back(static_cast<char>(byte));
         }
-        return result;
-      }
-      case Charset::ISO_8859_1:
-        // ... handle ISO-8859-1 ...
         break;
+      }
+      case Charset::ISO_8859_1: {
+        size_t inbytesleft = bytes.size();
+        char inbuf[inbytesleft];
+        for (size_t i = 0; i < bytes.size(); i++) {
+          inbuf[i] = static_cast<char>(bytes[i]);
+        }
+
+        size_t outbytesleft = bytes.size() * 2;
+        char outbuf[outbytesleft];
+        memset(outbuf, 0, outbytesleft);
+        char *inptr = inbuf;
+        char *outptr = outbuf;
+
+        iconv_t cd = iconv_open("UTF-8", "ISO-8859-1");
+        if (iconv(cd, &inptr, &inbytesleft, &outptr, &outbytesleft) == (size_t)-1) {
+          // Handle error
+          break;
+        }
+        iconv_close(cd);
+
+        result = std::string(outbuf);
+        break;
+      }
       case Charset::UTF_16BE:
         // ... handle UTF-16BE ...
         break;
@@ -151,24 +172,36 @@ std::vector<int64_t> encodeString(
         }
         break;
       }
-      case Charset::US_ASCII:
+      case Charset::US_ASCII: {
         for(char c : input) {
           if (c <= 127) {
             result.push_back(static_cast<int64_t>(c));
           }
         }
         break;
-      case Charset::ISO_8859_1:
-        // ... handle ISO-8859-1 ...
+      }
+      case Charset::ISO_8859_1: {
+        iconv_t cd = iconv_open("ISO-8859-1", "UTF-8");
+        size_t inbytesleft = input.size();
+        size_t outbytesleft = input.size() * 2;
+        char* inbuf = const_cast<char*>(input.c_str());
+        char outbuf[outbytesleft];
+        char *outptr = outbuf;
+        if (iconv(cd, &inbuf, &inbytesleft, &outptr, &outbytesleft) == (size_t)-1) {
+          // Handle error
+          iconv_close(cd);
+        } else {
+          iconv_close(cd);
+          for (size_t i = 0; i < (outptr - outbuf); ++i) {
+            result.push_back(static_cast<int64_t>(static_cast<unsigned char>(outbuf[i])));
+          }
+        }
         break;
+      }
       case Charset::UTF_16BE:
-        // ... handle UTF-16BE ...
-        break;
       case Charset::UTF_16LE:
-        // ... handle UTF-16LE ...
-        break;
       case Charset::UTF_16:
-        // ... handle UTF-16 ...
+      case Charset::UNKNOWN:
         break;
       default:
         // ... handle other charsets or raise an error ...

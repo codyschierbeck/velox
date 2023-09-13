@@ -19,6 +19,7 @@
 #include <stdint.h>
 #include <vector/tests/utils/VectorTestBase.h>
 #include <cstdint>
+#include <iconv.h>
 
 namespace facebook::velox::functions::sparksql::test {
 namespace {
@@ -332,11 +333,28 @@ TEST_F(StringTest, decodeASCII) {
     EXPECT_EQ(result, expected);
 }
 
-TEST_F(StringTest, decodeASCII){
+TEST_F(StringTest, encodeASCII){
     std::string input = "Hello";
     std::vector<std::int64_t> expected = {72, 101, 108, 108, 111};  // 'H', 'e', 'l', 'l', 'o'
 
-    EXPECT_EQ(decode(input, "us-ascii", expected), true);
+    EXPECT_EQ(encode(input, "us-ascii", expected), true);
+}
+
+TEST_F(StringTest, decodeISO88591) {
+    std::vector<int64_t> inputBytes = {241, 252, 223, 229, 231, 234, 244}; // ñüßåçêô in ISO-8859-1
+
+    auto optResult = decode(inputBytes, "iso-8859-1");
+    ASSERT_TRUE(optResult.has_value());
+    std::string result = optResult.value();
+    std::string expected = "ñüßåçêô"; // "ñüßåçêô";
+    EXPECT_EQ(result, expected);
+}
+
+TEST_F(StringTest, encodeISO88591) {
+    std::string input = "ñüßåçêô";
+    std::vector<int64_t> expected = {241, 252, 223, 229, 231, 234, 244}; // ñüßåçêô in ISO-8859-1
+
+    EXPECT_EQ(encode(input, "iso-8859-1", expected), true);
 }
 
 
