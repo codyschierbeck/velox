@@ -358,6 +358,26 @@ TEST_F(StringTest, encodeISO88591) {
 }
 
 
+TEST_F(StringTest, decodeUTF16BE) {
+    std::vector<int64_t> inputBytes = {
+        0, 72, 0, 101, 0, 108, 0, 108, 0, 111, 0, 44, 0, 32, 0, 87, 0, 111, 0, 114, 0, 108, 0, 100, 0, 33
+    }; // "Hello, World!" in UTF-16BE
+
+    auto optResult = decode(inputBytes, "UTF-16BE");
+    ASSERT_TRUE(optResult.has_value());
+    std::string result = optResult.value();
+    std::string expected = "Hello, World!";
+    EXPECT_EQ(result, expected);
+}
+
+TEST_F(StringTest, encodeUTF16BE) {
+    std::string input = "Hello, World!";
+    std::vector<int64_t> expected = {
+        0, 72, 0, 101, 0, 108, 0, 108, 0, 111, 0, 44, 0, 32, 0, 87, 0, 111, 0, 114, 0, 108, 0, 100, 0, 33
+    }; // "Hello, World!" in UTF-16BE
+
+    EXPECT_EQ(encode(input, "UTF-16BE", expected), true);
+}
 
 TEST_F(StringTest, LengthString) {
   EXPECT_EQ(length(""), 0);

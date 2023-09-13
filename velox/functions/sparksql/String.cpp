@@ -143,9 +143,27 @@ std::string decodeBytes(
         result = std::string(outbuf);
         break;
       }
-      case Charset::UTF_16BE:
-        // ... handle UTF-16BE ...
+      case Charset::UTF_16BE: {
+        size_t inbytesleft = bytes.size();
+        char inbuf[inbytesleft];
+        for (size_t i = 0; i < bytes.size(); i++) {
+          inbuf[i] = static_cast<char>(bytes[i]);
+        }
+
+        size_t outbytesleft = bytes.size() * 2;
+        char outbuf[outbytesleft];
+        memset(outbuf, 0, outbytesleft);
+        char* inptr = inbuf;
+        char* outptr = outbuf;
+
+        iconv_t cd = iconv_open("UTF-8", "UTF-16BE");
+        if (iconv(cd, &inptr, &inbytesleft, &outptr, &outbytesleft) == (size_t)-1) {
+          iconv_close(cd);
+          break;
+        }
+        result = std::string(outbuf);
         break;
+      }
       case Charset::UTF_16LE:
         // ... handle UTF-16LE ...
         break;
@@ -198,8 +216,46 @@ std::vector<int64_t> encodeString(
         }
         break;
       }
-      case Charset::UTF_16BE:
-      case Charset::UTF_16LE:
+      case Charset::UTF_16BE: {
+        size_t inbytesleft = input.size();
+        char* inbuf = const_cast<char*>(input.c_str());
+        size_t outbytesleft = input.size() * 2;
+        char outbuf[outbytesleft];
+        memset(outbuf, 0, outbytesleft);
+        char *outptr = outbuf;
+
+        iconv_t cd = iconv_open("UTF-16BE", "UTF-8");
+        if (iconv(cd, &inbuf, &inbytesleft, &outptr, &outbytesleft) == (size_t)-1) {
+          iconv_close(cd);
+          break;
+        }
+        iconv_close(cd);
+
+        for (size_t i = 0; i < (outptr - outbuf); ++i) {
+          result.push_back(static_cast<int64_t>(static_cast<unsigned char>(outbuf[i])));
+        }
+        break;
+      }
+      case Charset::UTF_16LE: {
+        size_t inbytesleft = input.size();
+        char* inbuf = const_cast<char*>(input.c_str());
+        size_t outbytesleft = input.size() * 2;
+        char outbuf[outbytesleft];
+        memset(outbuf, 0, outbytesleft);
+        char *outptr = outbuf;
+
+        iconv_t cd = iconv_open("UTF-16LE", "UTF-8");
+        if (iconv(cd, &inbuf, &inbytesleft, &outptr, &outbytesleft) == (size_t)-1) {
+          iconv_close(cd);
+          break;
+        }
+        iconv_close(cd);
+
+        for (size_t i = 0; i < (outptr - outbuf); ++i) {
+          result.push_back(static_cast<int64_t>(static_cast<unsigned char>(outbuf[i])));
+        }
+        break;
+      }
       case Charset::UTF_16:
       case Charset::UNKNOWN:
         break;
