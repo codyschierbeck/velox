@@ -19,6 +19,7 @@
 #include "velox/expression/VectorReaders.h"
 #include "velox/expression/VectorWriters.h"
 #include <iconv.h>
+#include <cerrno>
 
 namespace facebook::velox::functions::sparksql {
 
@@ -186,7 +187,24 @@ std::string decodeBytes(
         break;
       }
       case Charset::UTF_16: {
-        // ... handle UTF-16 ...
+        size_t inbytesleft = bytes.size();
+        char inbuf[inbytesleft];
+        for (size_t i = 0; i < bytes.size(); i++) {
+          inbuf[i] = static_cast<char>(bytes[i]);
+        }
+
+        size_t outbytesleft = bytes.size() * 2;
+        char outbuf[outbytesleft];
+        memset(outbuf, 0, outbytesleft);
+        char* inptr = inbuf;
+        char* outptr = outbuf;
+
+        iconv_t cd = iconv_open("UTF-8", "UTF-16");
+        if (iconv(cd, &inptr, &inbytesleft, &outptr, &outbytesleft) == (size_t)-1) {
+          iconv_close(cd);
+          break;
+        }
+        result = std::string(outbuf);
         break;
       }
       default:
@@ -274,7 +292,44 @@ std::vector<int64_t> encodeString(
         }
         break;
       }
-      case Charset::UTF_16:
+      case Charset::UTF_16: {
+        size_t inbytesleft = input.size();
+        char* inbuf = const_cast<char*>(input.c_str());
+        size_t outbytesleft = input.size() * 4;
+        char outbuf[outbytesleft];
+        memset(outbuf, 0, outbytesleft);
+        char *outptr = outbuf;
+
+        iconv_t cd = iconv_open("UTF-16", "UTF-8");
+        if (iconv(cd, &inbuf, &inbytesleft, &outptr, &outbytesleft) == (size_t)-1) {
+          int err = errno; // Get the error number
+          switch(err) {
+              case E2BIG:
+                  // Handle E2BIG error
+                  break;
+              case EILSEQ:
+                  // Handle EILSEQ error
+                  break;
+              case EINVAL:
+                  // Handle EINVAL error
+                  break;
+              default:
+                  // Handle other errors
+                  break;
+          }
+          iconv_close(cd);
+          break;
+        }
+        iconv_close(cd);
+        // UTF-16 does not specify Little Endian or Big Endian, leading to a BOM
+        // being added to the front of any encoded string to UTF-16.
+        // Skip to i = 2 to avoid this BOM. Assume users are aware
+        // of what their output will be in.
+        for (size_t i = 2; i < (outptr - outbuf); ++i) {
+          result.push_back(static_cast<int64_t>(static_cast<unsigned char>(outbuf[i])));
+        }
+        break;
+      }
       case Charset::UNKNOWN:
         break;
       default:
