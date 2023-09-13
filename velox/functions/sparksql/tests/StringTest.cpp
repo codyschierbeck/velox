@@ -43,7 +43,7 @@ class StringTest : public SparkFunctionBaseTest {
     return evaluateOnce<int32_t>("instr(c0, c1)", haystack, needle);
   }
 
-  std::optional<std::string> encode(
+  std::optional<std::string> decode(
     std::optional<std::vector<std::int64_t>> binary,
     std::optional<std::string> format) {
 
@@ -55,16 +55,16 @@ class StringTest : public SparkFunctionBaseTest {
 
     std::string formatStr;
     if(format) {
-        formatStr = fmt::format("encode(c0, '{}')", *format);
+        formatStr = fmt::format("decode(c0, '{}')", *format);
     } else {
-        formatStr = "encode(c0, 'default_format')";
+        formatStr = "decode(c0, 'default_format')";
     }
     auto rowVector = makeRowVector({arrayVector});
 
     return evaluateOnce<std::string>(formatStr, rowVector);
   }
 
-  bool decode(
+  bool encode(
       std::optional<std::string> input,
       std::optional<std::string> format,
       std::optional<std::vector<std::int64_t>> binary) {
@@ -72,7 +72,7 @@ class StringTest : public SparkFunctionBaseTest {
       return false;
     }
     auto vector = makeFlatVector<std::string>({*input});
-    const std::string& expr = fmt::format("decode(c0, '{}')", *format);
+    const std::string& expr = fmt::format("encode(c0, '{}')", *format);
     auto result =  evaluate<ArrayVector>(expr, makeRowVector({vector}));
     if (!binary) {
         return false;
@@ -288,11 +288,11 @@ TEST_F(StringTest, Instr) {
 }
 
 
-TEST_F(StringTest, encodeUTF8) {
+TEST_F(StringTest, decodeUTF8) {
     // Input: UTF-8 encoded "大千世界"
     std::vector<std::int64_t> inputBytes = {-27, -92, -89, -27, -115, -125, -28, -72, -106, -25, -107, -116};
 
-    auto optResult = encode(inputBytes, "utf-8");
+    auto optResult = decode(inputBytes, "utf-8");
 
     // Check if optional contains a value
     ASSERT_TRUE(optResult.has_value());
@@ -306,19 +306,19 @@ TEST_F(StringTest, encodeUTF8) {
     EXPECT_EQ(result, expected);
 }
 
-TEST_F(StringTest, decodeUTF8){
+TEST_F(StringTest, encodeUTF8){
   std::string input =  "大千世界";
   std::vector<std::int64_t> expected = {-27, -92, -89, -27, -115, -125, -28, -72, -106, -25, -107, -116};
 
-  EXPECT_EQ(decode(input, "utf-8", expected), true);
+  EXPECT_EQ(encode(input, "utf-8", expected), true);
 
 }
 
-TEST_F(StringTest, encodeASCII) {
+TEST_F(StringTest, decodeASCII) {
     // Input: ASCII encoded "Hello"
     std::vector<std::int64_t> inputBytes = {72, 101, 108, 108, 111};  // 'H', 'e', 'l', 'l', 'o'
 
-    auto optResult = encode(inputBytes, "us-ascii");
+    auto optResult = decode(inputBytes, "us-ascii");
 
     // Check if optional contains a value
     ASSERT_TRUE(optResult.has_value());

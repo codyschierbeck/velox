@@ -97,19 +97,18 @@ Charset stringToCharset(const folly::StringPiece format) {
 
 
 
-std::string encodeBytes(
+std::string decodeBytes(
   std::vector<int64_t> bytes,
   Charset format) {
+    std::string result;
     switch (format){
       case Charset::UTF_8: {
-        std::string result;
         for(int64_t byte : bytes) {
           result.push_back(static_cast<char>(byte));
         }
-        return result;
+        break;
       }
       case Charset::US_ASCII: {
-        std::string result;
         for(int64_t byte : bytes) {
           // Check if byte is within valid ASCII range
           if (byte < 0 || byte > 127) {
@@ -136,11 +135,11 @@ std::string encodeBytes(
       default:
         break;
     }
-    return "Fail";
+    return result;
   }
 
 
-std::vector<int64_t> decodeString(
+std::vector<int64_t> encodeString(
   std::string input,
   Charset format) {
     std::vector<int64_t> result;
@@ -205,7 +204,7 @@ class CharsetConverter : public exec::VectorFunction {
     auto fStr = format->valueAt<StringView>(0);
     Charset f  = stringToCharset(fStr);
 
-    if (!encode){
+    if (encode){
       context.ensureWritable(selected, ARRAY(BIGINT()), result);
       exec::VectorWriter<Array<int64_t>> resultWriter;
       resultWriter.init(*result->as<ArrayVector>());
@@ -214,7 +213,7 @@ class CharsetConverter : public exec::VectorFunction {
         auto& arrayWriter = resultWriter.current();
         const StringView& current = input->valueAt<StringView>(row);
         std::string strValue = current.getString();
-        std::vector<int64_t> bytes = decodeString(current, f);
+        std::vector<int64_t> bytes = encodeString(current, f);
         for (auto byte : bytes) {
           arrayWriter.push_back(byte);
         }
@@ -239,7 +238,7 @@ class CharsetConverter : public exec::VectorFunction {
             bytes.push_back(container.value());
           }
         }
-        std::string ans = encodeBytes(bytes, f);
+        std::string ans = decodeBytes(bytes, f);
         const StringView& answerStringView = StringView(ans.c_str());
         output->set(row, answerStringView);
       });
@@ -332,7 +331,7 @@ void encodeDigestToBase16(uint8_t* output, int digestSize) {
   }
 }
 
-std::vector<std::shared_ptr<exec::FunctionSignature>> encodeSignatures() {
+std::vector<std::shared_ptr<exec::FunctionSignature>> decodeSignatures() {
   return {
     exec::FunctionSignatureBuilder()
     .returnType("VARCHAR")
@@ -341,7 +340,7 @@ std::vector<std::shared_ptr<exec::FunctionSignature>> encodeSignatures() {
     .build(),
   };
 }
-std::vector<std::shared_ptr<exec::FunctionSignature>> decodeSignatures() {
+std::vector<std::shared_ptr<exec::FunctionSignature>> encodeSignatures() {
   return {
       exec::FunctionSignatureBuilder()
       .returnType("array(bigint)")
