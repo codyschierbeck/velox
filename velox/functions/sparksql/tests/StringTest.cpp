@@ -379,6 +379,27 @@ TEST_F(StringTest, encodeUTF16BE) {
     EXPECT_EQ(encode(input, "UTF-16BE", expected), true);
 }
 
+TEST_F(StringTest, decodeUTF16LE) {
+    std::vector<int64_t> inputBytes = {
+        72, 0, 101, 0, 108, 0, 108, 0, 111, 0, 44, 0, 32, 0, 87, 0, 111, 0, 114, 0, 108, 0, 100, 0, 33, 0
+    }; // "Hello, World!" in UTF-16LE
+
+    auto optResult = decode(inputBytes, "UTF-16LE");
+    ASSERT_TRUE(optResult.has_value());
+    std::string result = optResult.value();
+    std::string expected = "Hello, World!";
+    EXPECT_EQ(result, expected);
+}
+
+TEST_F(StringTest, encodeUTF16LE) {
+    std::string input = "Hello, World!";
+    std::vector<int64_t> expected = {
+        72, 0, 101, 0, 108, 0, 108, 0, 111, 0, 44, 0, 32, 0, 87, 0, 111, 0, 114, 0, 108, 0, 100, 0, 33, 0
+    }; // "Hello, World!" in UTF-16LE
+
+    EXPECT_EQ(encode(input, "UTF-16LE", expected), true);
+}
+
 TEST_F(StringTest, LengthString) {
   EXPECT_EQ(length(""), 0);
   EXPECT_EQ(length(std::string("\0", 1)), 1);

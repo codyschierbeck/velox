@@ -164,9 +164,27 @@ std::string decodeBytes(
         result = std::string(outbuf);
         break;
       }
-      case Charset::UTF_16LE:
-        // ... handle UTF-16LE ...
+      case Charset::UTF_16LE: {
+        size_t inbytesleft = bytes.size();
+        char inbuf[inbytesleft];
+        for (size_t i = 0; i < bytes.size(); i++) {
+          inbuf[i] = static_cast<char>(bytes[i]);
+        }
+
+        size_t outbytesleft = bytes.size() * 2;
+        char outbuf[outbytesleft];
+        memset(outbuf, 0, outbytesleft);
+        char* inptr = inbuf;
+        char* outptr = outbuf;
+
+        iconv_t cd = iconv_open("UTF-8", "UTF-16LE");
+        if (iconv(cd, &inptr, &inbytesleft, &outptr, &outbytesleft) == (size_t)-1) {
+          iconv_close(cd);
+          break;
+        }
+        result = std::string(outbuf);
         break;
+      }
       case Charset::UTF_16: {
         // ... handle UTF-16 ...
         break;
