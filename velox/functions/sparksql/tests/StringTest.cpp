@@ -65,24 +65,21 @@ class StringTest : public SparkFunctionBaseTest {
     return evaluateOnce<std::string>(formatStr, rowVector);
   }
 
-  bool encode(
+  std::shared_ptr<ArrayVector> encode(
       std::optional<std::string> input,
-      std::optional<std::string> format,
-      std::optional<std::vector<std::int64_t>> binary) {
-    if (!input) {
-      return false;
-    }
+      std::optional<std::string> format) {
     auto vector = makeFlatVector<std::string>({*input});
     const std::string& expr = fmt::format("encode(c0, '{}')", *format);
     auto result =  evaluate<ArrayVector>(expr, makeRowVector({vector}));
-    if (!binary) {
-        return false;
-    }
+    return result;
+    // if (!binary) {
+    //     return false;
+    // }
 
-    VectorPtr arrayVector = makeArrayVector<int64_t>({*binary});
-    ::facebook::velox::test::assertEqualVectors(arrayVector, result);
+    // VectorPtr arrayVector = makeArrayVector<int64_t>({*binary});
+    // ::facebook::velox::test::assertEqualVectors(arrayVector, result);
 
-    return true;
+    // return true;
   }
 
   std::optional<int32_t> length(std::optional<std::string> arg) {
@@ -310,8 +307,9 @@ TEST_F(StringTest, decodeUTF8) {
 TEST_F(StringTest, encodeUTF8){
   std::string input =  "大千世界";
   std::vector<std::int64_t> expected = {-27, -92, -89, -27, -115, -125, -28, -72, -106, -25, -107, -116};
-
-  EXPECT_EQ(encode(input, "utf-8", expected), true);
+  VectorPtr arrayVector = makeArrayVector<int64_t>({expected});
+  std::shared_ptr<ArrayVector> result = encode(input, "utf-8");
+  ::facebook::velox::test::assertEqualVectors(arrayVector, result);
 
 }
 
@@ -337,7 +335,9 @@ TEST_F(StringTest, encodeASCII){
     std::string input = "Hello";
     std::vector<std::int64_t> expected = {72, 101, 108, 108, 111};  // 'H', 'e', 'l', 'l', 'o'
 
-    EXPECT_EQ(encode(input, "us-ascii", expected), true);
+    VectorPtr arrayVector = makeArrayVector<int64_t>({expected});
+    std::shared_ptr<ArrayVector> result = encode(input, "us-ascii");
+    ::facebook::velox::test::assertEqualVectors(arrayVector, result);
 }
 
 TEST_F(StringTest, decodeISO88591) {
@@ -354,7 +354,9 @@ TEST_F(StringTest, encodeISO88591) {
     std::string input = "ñüßåçêô";
     std::vector<int64_t> expected = {241, 252, 223, 229, 231, 234, 244}; // ñüßåçêô in ISO-8859-1
 
-    EXPECT_EQ(encode(input, "iso-8859-1", expected), true);
+    VectorPtr arrayVector = makeArrayVector<int64_t>({expected});
+    std::shared_ptr<ArrayVector> result = encode(input, "iso-8859-1");
+    ::facebook::velox::test::assertEqualVectors(arrayVector, result);
 }
 
 
@@ -376,7 +378,9 @@ TEST_F(StringTest, encodeUTF16BE) {
         0, 72, 0, 101, 0, 108, 0, 108, 0, 111, 0, 44, 0, 32, 0, 87, 0, 111, 0, 114, 0, 108, 0, 100, 0, 33
     }; // "Hello, World!" in UTF-16BE
 
-    EXPECT_EQ(encode(input, "UTF-16BE", expected), true);
+    VectorPtr arrayVector = makeArrayVector<int64_t>({expected});
+    std::shared_ptr<ArrayVector> result = encode(input, "utf-16be");
+    ::facebook::velox::test::assertEqualVectors(arrayVector, result);
 }
 
 TEST_F(StringTest, decodeUTF16LE) {
@@ -397,7 +401,9 @@ TEST_F(StringTest, encodeUTF16LE) {
         72, 0, 101, 0, 108, 0, 108, 0, 111, 0, 44, 0, 32, 0, 87, 0, 111, 0, 114, 0, 108, 0, 100, 0, 33, 0
     }; // "Hello, World!" in UTF-16LE
 
-    EXPECT_EQ(encode(input, "UTF-16LE", expected), true);
+    VectorPtr arrayVector = makeArrayVector<int64_t>({expected});
+    std::shared_ptr<ArrayVector> result = encode(input, "UTF-16LE");
+    ::facebook::velox::test::assertEqualVectors(arrayVector, result);
 }
 
 TEST_F(StringTest, decodeUTF16) {
@@ -420,7 +426,9 @@ TEST_F(StringTest, encodeUTF16) {
         72, 0, 101, 0, 108, 0, 108, 0, 111, 0, 44, 0, 32, 0, 87, 0, 111, 0, 114, 0, 108, 0, 100, 0, 33, 0
     }; // "Hello, World!" in UTF-16
 
-    EXPECT_EQ(encode(input, "UTF-16", expected), true);
+    VectorPtr arrayVector = makeArrayVector<int64_t>({expected});
+    std::shared_ptr<ArrayVector> result = encode(input, "UTF-16");
+    ::facebook::velox::test::assertEqualVectors(arrayVector, result);
 }
 
 
