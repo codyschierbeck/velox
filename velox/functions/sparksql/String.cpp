@@ -97,6 +97,114 @@ Charset stringToCharset(const folly::StringPiece format) {
   return Charset::UNKNOWN;
 }
 
+std::string validateUTF8(std::string tmpResult) {
+  std::string result;
+  size_t i = 0;
+  while (i < tmpResult.size()) {
+    if ((tmpResult[i] & 0x80) == 0) { // 1-byte sequence
+      result.push_back(tmpResult[i]);
+      ++i;
+    } else if ((tmpResult[i] & 0xE0) == 0xC0) { // 2-byte sequence
+      if (i + 1 < tmpResult.size() && (tmpResult[i + 1] & 0xC0) == 0x80) {
+        result.push_back(tmpResult[i]);
+        result.push_back(tmpResult[i + 1]);
+        i += 2;
+      } else {
+        // Invalid sequence
+        result.append("\xEF\xBF\xBD"); // U+FFFD in UTF-8
+        ++i;
+      }
+    } else if ((tmpResult[i] & 0xF0) == 0xE0) { // 3-byte sequence
+      if (i + 2 < tmpResult.size() &&
+          (tmpResult[i + 1] & 0xC0) == 0x80 &&
+          (tmpResult[i + 2] & 0xC0) == 0x80) {
+        result.push_back(tmpResult[i]);
+        result.push_back(tmpResult[i + 1]);
+        result.push_back(tmpResult[i + 2]);
+        i += 3;
+      } else {
+        // Invalid sequence
+        result.append("\xEF\xBF\xBD");
+        ++i;
+      }
+    } else if ((tmpResult[i] & 0xF8) == 0xF0) { // 4-byte sequence
+      if (i + 3 < tmpResult.size() &&
+          (tmpResult[i + 1] & 0xC0) == 0x80 &&
+          (tmpResult[i + 2] & 0xC0) == 0x80 &&
+          (tmpResult[i + 3] & 0xC0) == 0x80) {
+        result.push_back(tmpResult[i]);
+        result.push_back(tmpResult[i + 1]);
+        result.push_back(tmpResult[i + 2]);
+        result.push_back(tmpResult[i + 3]);
+        i += 4;
+      } else {
+        // Invalid sequence
+        result.append("\xEF\xBF\xBD");
+        ++i;
+      }
+    } else {
+      // Invalid starting byte
+      result.append("\xEF\xBF\xBD");
+      ++i;
+    }
+  }
+  return result;
+}
+
+std::string validateUTF16(const std::string& tmpResult) {
+    std::string result;
+    size_t i = 0;
+
+    while (i < tmpResult.size()) {
+        // Ensure we have at least 2 bytes left, as UTF-16 needs at least 2 bytes.
+        if (i + 1 >= tmpResult.size()) {
+            // Not enough data for a UTF-16 character
+            result.append("\xFF\xFD"); // U+FFFD in UTF-16
+            ++i;
+            continue;
+        }
+
+        // Read two bytes to form a single UTF-16 code unit.
+        int code_unit = static_cast<unsigned char>(tmpResult[i]) << 8 | static_cast<unsigned char>(tmpResult[i + 1]);
+
+        // Check if the code unit is a high surrogate (D800–DBFF).
+        if (0xD800 <= code_unit && code_unit <= 0xDBFF) {
+            // It's a high surrogate. Ensure there's a subsequent low surrogate.
+            if (i + 3 >= tmpResult.size()) {
+                // Not enough data for full surrogate pair
+                result.append("\xFF\xFD");
+                i += 2;
+                continue;
+            }
+
+            int next_code_unit = static_cast<unsigned char>(tmpResult[i + 2]) << 8 | static_cast<unsigned char>(tmpResult[i + 3]);
+
+            // Check if the next code unit is a low surrogate (DC00–DFFF).
+            if (0xDC00 <= next_code_unit && next_code_unit <= 0xDFFF) {
+                // Valid surrogate pair.
+                result.append(tmpResult, i, 4); // Copy the surrogate pair.
+                i += 4;
+            } else {
+                // Next code unit wasn't a low surrogate. Invalid sequence.
+                result.append("\xFF\xFD");
+                i += 2;
+            }
+
+        } else if (0xDC00 <= code_unit && code_unit <= 0xDFFF) {
+            // Lone low surrogate. Invalid.
+            result.append("\xFF\xFD");
+            i += 2;
+
+        } else {
+            // Regular UTF-16 character (not part of a surrogate pair).
+            result.append(tmpResult, i, 2);
+            i += 2;
+        }
+    }
+
+    return result;
+}
+
 
 
 std::string decodeBytes(
@@ -105,9 +213,11 @@ std::string decodeBytes(
     std::string result;
     switch (format){
       case Charset::UTF_8: {
+        std::string tmpResult;
         for(int64_t byte : bytes) {
-          result.push_back(static_cast<char>(byte));
+          tmpResult.push_back(static_cast<char>(byte));
         }
+        result = validateUTF8(tmpResult);
         break;
       }
       case Charset::US_ASCII: {
@@ -193,7 +303,7 @@ std::string decodeBytes(
           inbuf[i] = static_cast<char>(bytes[i]);
         }
 
-        size_t outbytesleft = bytes.size() * 2;
+        size_t outbytesleft = (bytes.size() * 2) + 2;
         char outbuf[outbytesleft];
         memset(outbuf, 0, outbytesleft);
         char* inptr = inbuf;
@@ -202,7 +312,7 @@ std::string decodeBytes(
         iconv_t cd = iconv_open("UTF-8", "UTF-16");
         if (iconv(cd, &inptr, &inbytesleft, &outptr, &outbytesleft) == (size_t)-1) {
           iconv_close(cd);
-          break;
+          return "\uFFFD";
         }
         result = std::string(outbuf);
         break;
@@ -295,28 +405,16 @@ std::vector<int64_t> encodeString(
       case Charset::UTF_16: {
         size_t inbytesleft = input.size();
         char* inbuf = const_cast<char*>(input.c_str());
-        size_t outbytesleft = input.size() * 4;
+        // Add two extra bytes to allow for BOM.
+        // BE = FE FF
+        // LE = FF FE
+        size_t outbytesleft = (input.size() * 2) + 2;
         char outbuf[outbytesleft];
         memset(outbuf, 0, outbytesleft);
         char *outptr = outbuf;
 
         iconv_t cd = iconv_open("UTF-16", "UTF-8");
         if (iconv(cd, &inbuf, &inbytesleft, &outptr, &outbytesleft) == (size_t)-1) {
-          int err = errno; // Get the error number
-          switch(err) {
-              case E2BIG:
-                  // Handle E2BIG error
-                  break;
-              case EILSEQ:
-                  // Handle EILSEQ error
-                  break;
-              case EINVAL:
-                  // Handle EINVAL error
-                  break;
-              default:
-                  // Handle other errors
-                  break;
-          }
           iconv_close(cd);
           break;
         }
@@ -325,7 +423,7 @@ std::vector<int64_t> encodeString(
         // being added to the front of any encoded string to UTF-16.
         // Skip to i = 2 to avoid this BOM. Assume users are aware
         // of what their output will be in.
-        for (size_t i = 2; i < (outptr - outbuf); ++i) {
+        for (size_t i = 0; i < (outptr - outbuf); ++i) {
           result.push_back(static_cast<int64_t>(static_cast<unsigned char>(outbuf[i])));
         }
         break;

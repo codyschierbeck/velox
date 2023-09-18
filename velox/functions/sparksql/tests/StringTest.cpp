@@ -285,6 +285,12 @@ TEST_F(StringTest, Instr) {
       10);
 }
 
+bool isLittleEndian() {
+  uint16_t number = 1;
+  char* byte = reinterpret_cast<char*>(&number);
+  return byte[0] == 1;
+}
+
 
 TEST_F(StringTest, decodeUTF8) {
     // Input: UTF-8 encoded "大千世界"
@@ -407,11 +413,21 @@ TEST_F(StringTest, encodeUTF16LE) {
 }
 
 TEST_F(StringTest, decodeUTF16) {
+    bool isLE = isLittleEndian();
     std::vector<int64_t> inputBytes = {
         // Assuming system default is LE (Little Endian), otherwise adjust accordingly
         72, 0, 101, 0, 108, 0, 108, 0, 111, 0, 44, 0, 32, 0, 87, 0, 111, 0, 114, 0, 108, 0, 100, 0, 33, 0
     }; // "Hello, World!" in UTF-16
 
+    if (isLE) {
+        // Prepend Little Endian BOM
+        inputBytes.insert(inputBytes.begin(), 254);
+        inputBytes.insert(inputBytes.begin(), 255);
+    } else {
+        // Prepend Big Endian BOM
+        inputBytes.insert(inputBytes.begin(), 255);
+        inputBytes.insert(inputBytes.begin(), 254);
+    }
     auto optResult = decode(inputBytes, "UTF-16");
     ASSERT_TRUE(optResult.has_value());
     std::string result = optResult.value();
@@ -420,16 +436,56 @@ TEST_F(StringTest, decodeUTF16) {
 }
 
 TEST_F(StringTest, encodeUTF16) {
+    bool isLE = isLittleEndian();
     std::string input = "Hello, World!";
     std::vector<int64_t> expected = {
         // Assuming system default is LE (Little Endian), otherwise adjust accordingly
         72, 0, 101, 0, 108, 0, 108, 0, 111, 0, 44, 0, 32, 0, 87, 0, 111, 0, 114, 0, 108, 0, 100, 0, 33, 0
     }; // "Hello, World!" in UTF-16
 
+    if (isLE) {
+      // Prepend Little Endian BOM
+      expected.insert(expected.begin(), 254);
+      expected.insert(expected.begin(), 255);
+    } else {
+      expected.insert(expected.begin(), 255);
+      expected.insert(expected.begin(), 254);
+    }
+
     VectorPtr arrayVector = makeArrayVector<int64_t>({expected});
     std::shared_ptr<ArrayVector> result = encode(input, "UTF-16");
     ::facebook::velox::test::assertEqualVectors(arrayVector, result);
 }
+
+TEST_F(StringTest, encodeEmptyString) {
+    std::string input = "";
+    std::vector<int64_t> expected = {};
+    VectorPtr arrayVector = makeArrayVector<int64_t>({expected});
+    std::shared_ptr<ArrayVector> result = encode(input, "utf-8");
+    ::facebook::velox::test::assertEqualVectors(arrayVector, result);
+}
+
+TEST_F(StringTest, encodeSpecialCharacters) {
+    std::string input = "\t\n\r";
+    std::vector<int64_t> expected = {9, 10, 13}; // tab, newline, carriage return in ASCII
+    VectorPtr arrayVector = makeArrayVector<int64_t>({expected});
+    std::shared_ptr<ArrayVector> result = encode(input, "us-ascii");
+    ::facebook::velox::test::assertEqualVectors(arrayVector, result);
+}
+
+TEST_F(StringTest, decodeInvalidUTF8Sequence) {
+    std::vector<int64_t> inputBytes = {-27}; // incomplete UTF-8 byte sequence
+    auto optResult = decode(inputBytes, "utf-8");
+    EXPECT_EQ(optResult.value(), "\U0000fffd"); // Invalid UTF-8 Unicode value
+}
+
+TEST_F(StringTest, validateInvalidUTF16Sequence) {
+    std::vector<int64_t> inputBytes = {55296}; // High surrogate without its matching low surrogate
+    auto optResult = decode(inputBytes, "utf-16");
+    EXPECT_EQ(optResult.value(), "\U0000fffd");
+}
+
+
 
 
 TEST_F(StringTest, LengthString) {
