@@ -440,17 +440,8 @@ TEST_F(StringTest, encodeUTF16) {
     std::string input = "Hello, World!";
     std::vector<int64_t> expected = {
         // Assuming system default is LE (Little Endian), otherwise adjust accordingly
-        72, 0, 101, 0, 108, 0, 108, 0, 111, 0, 44, 0, 32, 0, 87, 0, 111, 0, 114, 0, 108, 0, 100, 0, 33, 0
+        255, 254, 0, 72, 0, 101, 0, 108, 0, 108, 0, 111, 0, 44, 0, 32, 0, 87, 0, 111, 0, 114, 0, 108, 0, 100, 0, 33
     }; // "Hello, World!" in UTF-16
-
-    if (isLE) {
-      // Prepend Little Endian BOM
-      expected.insert(expected.begin(), 254);
-      expected.insert(expected.begin(), 255);
-    } else {
-      expected.insert(expected.begin(), 255);
-      expected.insert(expected.begin(), 254);
-    }
 
     VectorPtr arrayVector = makeArrayVector<int64_t>({expected});
     std::shared_ptr<ArrayVector> result = encode(input, "UTF-16");

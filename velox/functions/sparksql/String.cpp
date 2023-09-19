@@ -412,8 +412,9 @@ std::vector<int64_t> encodeString(
         char outbuf[outbytesleft];
         memset(outbuf, 0, outbytesleft);
         char *outptr = outbuf;
-
-        iconv_t cd = iconv_open("UTF-16", "UTF-8");
+        // iconv works based on system BOM, but Spark defaults to BE
+        // Substitute UTF-16BE for BE.
+        iconv_t cd = iconv_open("UTF-16BE", "UTF-8");
         if (iconv(cd, &inbuf, &inbytesleft, &outptr, &outbytesleft) == (size_t)-1) {
           iconv_close(cd);
           break;
@@ -421,8 +422,10 @@ std::vector<int64_t> encodeString(
         iconv_close(cd);
         // UTF-16 does not specify Little Endian or Big Endian, leading to a BOM
         // being added to the front of any encoded string to UTF-16.
-        // Skip to i = 2 to avoid this BOM. Assume users are aware
-        // of what their output will be in.
+        // Spark defaults to Big Endian no matter what the system BOM is
+        // so we replicate that here.
+        result.push_back(255);
+        result.push_back(254);
         for (size_t i = 0; i < (outptr - outbuf); ++i) {
           result.push_back(static_cast<int64_t>(static_cast<unsigned char>(outbuf[i])));
         }
