@@ -44,6 +44,8 @@ enum class PatternKind {
   kGeneric,
 };
 
+static const int kMaxCompiledRegexes = 20;
+
 /// The functions in this file use RE2 as the regex engine. RE2 is fast, but
 /// supports only a subset of PCRE syntax and in particular does not support
 /// backtracking and associated features (e.g. backreferences).
