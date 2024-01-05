@@ -115,9 +115,18 @@ add_library(velox_expression_runner ExpressionRunner.cpp)
 target_link_libraries(velox_expression_runner velox_expression_verifier
                       velox_functions_prestosql velox_parse_parser gtest)
 
+add_library(spark_expression_runner ExpressionRunner.cpp)
+target_link_libraries(spark_expression_runner velox_expression_verifier
+                      velox_functions_spark velox_parse_parser gtest)
+
 add_executable(velox_expression_runner_test ExpressionRunnerTest.cpp)
 target_link_libraries(
   velox_expression_runner_test velox_expression_runner velox_exec_test_lib
+  velox_function_registry gtest gtest_main)
+
+add_executable(spark_expression_runner_test SparkExpressionRunnerTest.cpp)
+target_link_libraries(
+  spark_expression_runner_test spark_expression_runner velox_exec_test_lib
   velox_function_registry gtest gtest_main)
 
 add_executable(velox_expression_verifier_unit_test

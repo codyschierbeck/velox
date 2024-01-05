@@ -267,7 +267,7 @@ evaluate constant expression or together with ``--input_path`` to evaluate
 expression on a vector. ``--sql`` and ``--sql_path`` flags are mutually
 exclusive. If both are specified, ``--sql`` is used while ``--sql_path`` is
 ignored. ``--sql`` option allow to specify multiple comma-separated SQL
-expressions.
+expressions. To run SparkSQL queries, use velox/expression/tests:spark_expression_runner_test instead of velox_expression_runner_test.
 
 ::
 
