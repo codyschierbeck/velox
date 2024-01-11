@@ -14,11 +14,11 @@
  * limitations under the License.
  */
 
-#include "velox/expression/tests/ExpressionRunner.h"
 #include <folly/init/Init.h>
 #include <gflags/gflags.h>
 #include <gtest/gtest.h>
 #include "velox/common/base/Fs.h"
+#include "velox/expression/tests/ExpressionRunner.h"
 #include "velox/expression/tests/ExpressionVerifier.h"
 #include "velox/functions/sparksql/Register.h"
 #include "velox/vector/VectorSaver.h"
