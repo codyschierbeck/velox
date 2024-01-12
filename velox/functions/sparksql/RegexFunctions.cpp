@@ -110,26 +110,15 @@ template <typename T>
 struct RegexpReplaceFunction {
   VELOX_DEFINE_FUNCTION_TYPES(T);
 
-  void call(
+  bool call(
       out_type<Varchar>& result,
       const arg_type<Varchar>& stringInput,
       const arg_type<Varchar>& pattern,
       const arg_type<Varchar>& replace) {
-    re2::RE2* patternRegex = getCachedRegex(pattern.str());
-    re2::StringPiece replaceStringPiece = toStringPiece(replace);
-
-    std::string string(stringInput.data(), stringInput.size());
-    RE2::GlobalReplace(&string, *patternRegex, replaceStringPiece);
-
-    if (string.size()) {
-      result.resize(string.size());
-      std::memcpy(result.data(), string.data(), string.size());
-    } else {
-      result.resize(0);
-    }
+    return call(result, stringInput, pattern, replace, 1);
   }
 
-  void call(
+  bool call(
       out_type<Varchar>& result,
       const arg_type<Varchar>& stringInput,
       const arg_type<Varchar>& pattern,
@@ -145,7 +134,7 @@ struct RegexpReplaceFunction {
       result.resize(inputStringPiece.size());
       std::memcpy(
           result.data(), inputStringPiece.data(), inputStringPiece.size());
-      return;
+      return true;
     }
 
     // Adjust the position for UTF-8 by counting the code points.
@@ -163,7 +152,7 @@ struct RegexpReplaceFunction {
       result.resize(inputStringPiece.size());
       std::memcpy(
           result.data(), inputStringPiece.data(), inputStringPiece.size());
-      return;
+      return true;
     }
 
     re2::StringPiece prefix(inputStringPiece.data(), utf8Position);
@@ -183,7 +172,7 @@ struct RegexpReplaceFunction {
           targetString.data(),
           targetString.size());
     } else {
-      result.resize(0);
+      return false;
     }
   }
 
