@@ -171,6 +171,7 @@ struct RegexpReplaceFunction {
           result.data() + prefix.size(),
           targetString.data(),
           targetString.size());
+      return true;
     } else {
       return false;
     }
