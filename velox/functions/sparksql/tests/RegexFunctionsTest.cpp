@@ -20,6 +20,7 @@
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
 
+#include "velox/common/base/tests/GTestUtils.h"
 #include "velox/functions/lib/Re2Functions.h"
 #include "velox/functions/sparksql/RegexFunctions.h"
 #include "velox/functions/sparksql/tests/SparkFunctionBaseTest.h"
@@ -165,6 +166,24 @@ class RegexFunctionsTest : public test::SparkFunctionBaseTest {
 
     return makeNullableFlatVector(repeatedOutput);
   }
+
+  std::string randomString(size_t length, std::mt19937& generator) {
+    const std::string characters =
+        "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+    std::uniform_int_distribution<> char_distribution(0, characters.size() - 1);
+
+    std::string result;
+    for (size_t i = 0; i < length; ++i) {
+      result += characters[char_distribution(generator)];
+    }
+
+    return result;
+  }
+
+  int randomPosition(std::mt19937& generator) {
+    std::uniform_int_distribution<> position_distribution(0, 100);
+    return position_distribution(generator); // Generate a random position
+  }
 };
 
 // A list of known incompatibilities with java.util.regex. Most result in an
@@ -301,15 +320,21 @@ TEST_F(RegexFunctionsTest, regexpReplaceWithEmptyString) {
 }
 
 TEST_F(RegexFunctionsTest, regexBadJavaPattern) {
-  EXPECT_THROW(testRegexpReplace("[]", "[a[b]]", ""), VeloxUserError);
-  EXPECT_THROW(testRegexpReplace("[]", "[a&&[b]]", ""), VeloxUserError);
-  EXPECT_THROW(testRegexpReplace("[]", "[a&&[^b]]", ""), VeloxUserError);
+  VELOX_ASSERT_THROW(
+      testRegexpReplace("[]", "[a[b]]", ""),
+      "regexp_replace does not support character class union, intersection, or difference ([a[b]], [a&&[b]], [a&&[^b]])");
+  VELOX_ASSERT_THROW(
+      testRegexpReplace("[]", "[a&&[b]]", ""),
+      "regexp_replace does not support character class union, intersection, or difference ([a[b]], [a&&[b]], [a&&[^b]])");
+  VELOX_ASSERT_THROW(
+      testRegexpReplace("[]", "[a&&[^b]]", ""),
+      "regexp_replace does not support character class union, intersection, or difference ([a[b]], [a&&[b]], [a&&[^b]])");
 }
 
 TEST_F(RegexFunctionsTest, regexpReplaceInvalidUTF8) {
-  EXPECT_THROW(
+  VELOX_ASSERT_THROW(
       testRegexpReplace(std::string("\xA0") + "bcacbdefg", "", "", {2}),
-      VeloxUserError);
+      "regexp_replace encountered invalid UTF-8 character");
 }
 
 TEST_F(RegexFunctionsTest, regexpReplacePosition) {
@@ -325,11 +350,15 @@ TEST_F(RegexFunctionsTest, regexpReplacePosition) {
 }
 
 TEST_F(RegexFunctionsTest, regexpReplaceNegativePosition) {
-  EXPECT_THROW(testRegexpReplace("abc", "a", "", {-1}), VeloxUserError);
+  VELOX_ASSERT_THROW(
+      testRegexpReplace("abc", "a", "", {-1}),
+      "regexp_replace requires a position >= 1");
 }
 
 TEST_F(RegexFunctionsTest, regexpReplaceZeroPosition) {
-  EXPECT_THROW(testRegexpReplace("abc", "a", "", {0}), VeloxUserError);
+  VELOX_ASSERT_THROW(
+      testRegexpReplace("abc", "a", "", {0}),
+      "regexp_replace requires a position >= 1");
 }
 
 TEST_F(RegexFunctionsTest, regexpReplacePositionTooLarge) {
@@ -543,8 +572,10 @@ TEST_F(RegexFunctionsTest, regexpReplaceCacheLimitTest) {
         "X" + std::to_string(i) + "-Y" + std::to_string(i));
   }
 
-  EXPECT_THROW(
-      testingRegexpReplaceRows(strings, patterns, replaces), VeloxUserError);
+  VELOX_ASSERT_THROW(
+      testingRegexpReplaceRows(strings, patterns, replaces),
+      "regexp_replace hit the maximum number of unique regexes: " +
+          std::to_string(kMaxCompiledRegexes));
 }
 
 TEST_F(RegexFunctionsTest, regexpReplaceCacheMissLimit) {
@@ -567,6 +598,13 @@ TEST_F(RegexFunctionsTest, regexpReplaceCacheMissLimit) {
       testingRegexpReplaceRows(strings, patterns, replaces, positions, 50000);
   auto output = convertOutput(expectedOutputs, 50000);
   assertEqualVectors(result, output);
+}
+
+TEST_F(RegexFunctionsTest, regexpReplaceFuzzerBug) {
+  std::string output = "i";
+  std::string replace = "\"LpA|{WDG?MDP+T";
+  auto result = testRegexpReplace("i", "i", replace, {2});
+  EXPECT_EQ(result, output);
 }
 
 } // namespace
