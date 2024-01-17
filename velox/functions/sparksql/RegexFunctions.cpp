@@ -110,81 +110,63 @@ template <typename T>
 struct RegexpReplaceFunction {
   VELOX_DEFINE_FUNCTION_TYPES(T);
 
-  void call(
+  bool call(
       out_type<Varchar>& result,
       const arg_type<Varchar>& stringInput,
       const arg_type<Varchar>& pattern,
       const arg_type<Varchar>& replace) {
-    re2::RE2* patternRegex = getCachedRegex(pattern.str());
-    re2::StringPiece replaceStringPiece = toStringPiece(replace);
-
-    std::string string(stringInput.data(), stringInput.size());
-    RE2::GlobalReplace(&string, *patternRegex, replaceStringPiece);
-
-    if (string.size()) {
-      result.resize(string.size());
-      std::memcpy(result.data(), string.data(), string.size());
-    } else {
-      result.resize(0);
-    }
+    return call(result, stringInput, pattern, replace, 1);
   }
 
-  void call(
+  bool call(
       out_type<Varchar>& result,
       const arg_type<Varchar>& stringInput,
       const arg_type<Varchar>& pattern,
       const arg_type<Varchar>& replace,
       const arg_type<int64_t>& position) {
+    if (position > int(stringInput.size()) + 1) {
+      result = stringInput;
+      result.resize(stringInput.size());
+      return true;
+    }
+
     VELOX_USER_CHECK_GE(position, 1, "regexp_replace requires a position >= 1");
+    if (stringInput.size() == 0) {
+      if (pattern.size() == 0 && position == 1) {
+        result = replace;
+        result.resize(replace.size());
+        return true;
+      }
+      if (pattern.size() > 0) {
+        result = stringInput;
+        result.resize(stringInput.size());
+        return true;
+      }
+    }
 
     re2::RE2* patternRegex = getCachedRegex(pattern.str());
     re2::StringPiece replaceStringPiece = toStringPiece(replace);
-    re2::StringPiece inputStringPiece = toStringPiece(stringInput);
 
-    if (position > stringInput.size() + 1) {
-      result.resize(inputStringPiece.size());
-      std::memcpy(
-          result.data(), inputStringPiece.data(), inputStringPiece.size());
-      return;
-    }
-
-    // Adjust the position for UTF-8 by counting the code points.
-    size_t utf8Position = 0;
-    size_t numCodePoints = 0;
-    while (numCodePoints < position - 1 && utf8Position <= stringInput.size()) {
-      int charLength =
-          utf8proc_char_length(inputStringPiece.data() + utf8Position);
-      VELOX_USER_CHECK_GT(
-          charLength, 0, "regexp_replace encountered invalid UTF-8 character");
-      ++numCodePoints;
-      utf8Position += charLength;
-    }
+    size_t utf8Position =
+        getUTFLength(stringInput.data(), stringInput.size(), position);
     if (utf8Position > stringInput.size() + 1) {
-      result.resize(inputStringPiece.size());
-      std::memcpy(
-          result.data(), inputStringPiece.data(), inputStringPiece.size());
-      return;
+      result = stringInput;
+      result.resize(stringInput.size());
+      return true;
     }
 
-    re2::StringPiece prefix(inputStringPiece.data(), utf8Position);
-    re2::StringPiece targetStringPiece(
-        inputStringPiece.data() + utf8Position,
-        inputStringPiece.size() - utf8Position);
-
+    std::string prefix(stringInput.data(), utf8Position);
     std::string targetString(
-        targetStringPiece.data(), targetStringPiece.size());
+        stringInput.data() + utf8Position, stringInput.size() - utf8Position);
+
     RE2::GlobalReplace(&targetString, *patternRegex, replaceStringPiece);
 
     if (targetString.size() || prefix.size()) {
+      result = prefix + targetString;
       result.resize(prefix.size() + targetString.size());
-      std::memcpy(result.data(), prefix.data(), prefix.size());
-      std::memcpy(
-          result.data() + prefix.size(),
-          targetString.data(),
-          targetString.size());
-    } else {
-      result.resize(0);
+      return true;
     }
+    return false;
   }
 
  private:
@@ -208,6 +190,20 @@ struct RegexpReplaceFunction {
 
   mutable folly::F14FastMap<std::string, std::unique_ptr<re2::RE2>>
       patternCache_;
+
+  size_t getUTFLength(const char* str, size_t len, size_t max_length) {
+    // Adjust the position for UTF-8 by counting the code points.
+    size_t utf8Position = 0;
+    size_t numCodePoints = 0;
+    while (numCodePoints < max_length - 1 && utf8Position <= len) {
+      int charLength = utf8proc_char_length(str + utf8Position);
+      VELOX_USER_CHECK_GT(
+          charLength, 0, "regexp_replace encountered invalid UTF-8 character");
+      ++numCodePoints;
+      utf8Position += charLength;
+    }
+    return utf8Position;
+  }
 };
 
 } // namespace
