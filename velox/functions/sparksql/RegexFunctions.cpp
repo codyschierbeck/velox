@@ -13,8 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <folly/container/F14Map.h>
 #include <re2/stringpiece.h>
+#include "velox/common/caching/SimpleLRUCache.h"
 #include "velox/functions/lib/Re2Functions.h"
 
 namespace facebook::velox::functions::sparksql {
@@ -111,6 +111,10 @@ template <typename T>
 struct RegexpReplaceFunction {
   VELOX_DEFINE_FUNCTION_TYPES(T);
 
+  using RegexLRUCache = SimpleLRUCache<std::string, std::shared_ptr<re2::RE2>>;
+
+  RegexpReplaceFunction() : cache_(kMaxCompiledRegexes, 1) {}
+
   bool call(
       out_type<Varchar>& result,
       const arg_type<Varchar>& stringInput,
@@ -141,12 +145,13 @@ struct RegexpReplaceFunction {
         return true;
       }
     }
-
-    re2::RE2* patternRegex = getCachedRegex(pattern.str());
-    re2::StringPiece replaceStringPiece = toStringPiece(replace);
-
     size_t utf8Position =
         getUTFLength(stringInput.data(), stringInput.size(), position);
+
+    std::shared_ptr<re2::RE2> patternRegex = getRegex(pattern.str());
+    re2::StringPiece replaceStringPiece = toStringPiece(replace);
+
+
     if (utf8Position > stringInput.size() + 1) {
       result = stringInput;
       return true;
@@ -166,26 +171,22 @@ struct RegexpReplaceFunction {
   }
 
  private:
-  re2::RE2* getCachedRegex(const std::string& pattern) const {
-    auto it = patternCache_.find(pattern);
-    if (it != patternCache_.end()) {
-      return it->second.get();
+  std::shared_ptr<re2::RE2> getRegex(const std::string& pattern) const {
+    std::optional<std::shared_ptr<re2::RE2>> cachedRegex = cache_.get(pattern);
+    if (cachedRegex) {
+      return *cachedRegex;
     }
-    VELOX_USER_CHECK_LT(
-        patternCache_.size(),
-        kMaxCompiledRegexes,
-        "regexp_replace hit the maximum number of unique regexes: {}",
-        kMaxCompiledRegexes);
+
     checkForCompatiblePattern(pattern, "regexp_replace");
-    auto patternRegex = std::make_unique<re2::RE2>(pattern);
-    auto* rawPatternRegex = patternRegex.get();
-    checkForBadPattern(*rawPatternRegex);
-    patternCache_.emplace(pattern, std::move(patternRegex));
-    return rawPatternRegex;
+    std::shared_ptr<re2::RE2> patternRegex =
+        std::make_shared<re2::RE2>(pattern);
+    checkForBadPattern(*patternRegex.get());
+
+    cache_.add(pattern, patternRegex);
+    return patternRegex;
   }
 
-  mutable folly::F14FastMap<std::string, std::unique_ptr<re2::RE2>>
-      patternCache_;
+  mutable RegexLRUCache cache_;
 
   size_t getUTFLength(const char* str, size_t len, size_t max_length) {
     // Adjust the position for UTF-8 by counting the code points.

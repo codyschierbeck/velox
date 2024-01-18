@@ -558,26 +558,6 @@ TEST_F(RegexFunctionsTest, regexpReplaceMassiveVectors) {
   assertEqualVectors(result, output);
 }
 
-TEST_F(RegexFunctionsTest, regexpReplaceCacheLimitTest) {
-  std::vector<std::string> patterns;
-  std::vector<std::string> strings;
-  std::vector<std::string> replaces;
-  std::vector<std::string> expectedOutputs;
-
-  for (int i = 0; i <= kMaxCompiledRegexes; ++i) {
-    patterns.push_back("\\d" + std::to_string(i) + "-\\d" + std::to_string(i));
-    strings.push_back("1" + std::to_string(i) + "-2" + std::to_string(i));
-    replaces.push_back("X" + std::to_string(i) + "-Y" + std::to_string(i));
-    expectedOutputs.push_back(
-        "X" + std::to_string(i) + "-Y" + std::to_string(i));
-  }
-
-  VELOX_ASSERT_THROW(
-      testingRegexpReplaceRows(strings, patterns, replaces),
-      "regexp_replace hit the maximum number of unique regexes: " +
-          std::to_string(kMaxCompiledRegexes));
-}
-
 TEST_F(RegexFunctionsTest, regexpReplaceCacheMissLimit) {
   std::vector<std::string> patterns;
   std::vector<std::string> strings;
