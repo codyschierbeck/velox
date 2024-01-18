@@ -14,6 +14,7 @@
  * limitations under the License.
  */
 #include <re2/stringpiece.h>
+#include <folly/container/F14Map.h>
 #include "velox/common/caching/SimpleLRUCache.h"
 #include "velox/functions/lib/Re2Functions.h"
 
@@ -171,22 +172,51 @@ struct RegexpReplaceFunction {
   }
 
  private:
-  std::shared_ptr<re2::RE2> getRegex(const std::string& pattern) const {
+  std::shared_ptr<re2::RE2> getFromCache_(const std::string& pattern) const {
     std::optional<std::shared_ptr<re2::RE2>> cachedRegex = cache_.get(pattern);
     if (cachedRegex) {
       return *cachedRegex;
     }
+    return nullptr;
+  }
+  void addToCache_(const std::string& pattern, std::shared_ptr<re2::RE2> regex)
+      const {
+    cache_.add(pattern, regex);
+  }
+  void addToMap_(const std::string& pattern, std::shared_ptr<re2::RE2> regex)
+      const {
+    regexCache_.emplace(std::make_pair(pattern, regex));
+  }
+  std::shared_ptr<re2::RE2> getFromMap_(const std::string& pattern) const {
+    auto it = regexCache_.find(pattern);
+    if (it != regexCache_.end()) {
+      return it->second;
+    }
+    return nullptr;
+  }
+  std::shared_ptr<re2::RE2> getRegex(const std::string& pattern) const {
+    std::shared_ptr<re2::RE2> pReg = getFromCache_(pattern);
+    if (pReg != nullptr) {
+      return pReg;
+    }
+
+    // VELOX_USER_CHECK_LT(
+    // regexCache_.size(),
+    // kMaxCompiledRegexes,
+    // "regexp_replace hit the maximum number of unique regexes: {}",
+    // kMaxCompiledRegexes);
 
     checkForCompatiblePattern(pattern, "regexp_replace");
     std::shared_ptr<re2::RE2> patternRegex =
         std::make_shared<re2::RE2>(pattern);
     checkForBadPattern(*patternRegex.get());
 
-    cache_.add(pattern, patternRegex);
+    addToCache_(pattern, patternRegex);
     return patternRegex;
   }
 
   mutable RegexLRUCache cache_;
+  mutable folly::F14FastMap<std::string, std::shared_ptr<re2::RE2>> regexCache_;
 
   size_t getUTFLength(const char* str, size_t len, size_t max_length) {
     // Adjust the position for UTF-8 by counting the code points.
