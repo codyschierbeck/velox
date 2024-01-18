@@ -13,7 +13,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-#include <folly/container/F14Map.h>
+#include <re2/stringpiece.h>
+#include "velox/common/caching/SimpleLRUCache.h"
 #include "velox/functions/lib/Re2Functions.h"
 
 namespace facebook::velox::functions::sparksql {
@@ -46,7 +47,7 @@ void checkForBadPattern(const RE2& re) {
 // error messages.
 //
 // @throws VELOX_USER_FAIL If the pattern is found to use unsupported features.
-// @note  Default functionName is "REGEX_REPLACE" because it uses non-constant
+// @note  Default functionName is "REGEXP_REPLACE" because it uses non-constant
 // patterns so it cannot be checked with "ensureRegexIsCompatible". No
 // other functions work with non-constant patterns, but they may in the future.
 //
@@ -96,8 +97,8 @@ void ensureRegexIsConstantAndCompatible(
       std::string(pattern.data(), pattern.size()), functionName);
 }
 
-// REGEX_REPLACE(string, pattern, overwrite) → string
-// REGEX_REPLACE(string, pattern, overwrite, position) → string
+// REGEXP_REPLACE(string, pattern, overwrite) → string
+// REGEXP_REPLACE(string, pattern, overwrite, position) → string
 //
 // If a string has a substring that matches the given pattern, replace
 // the match in the string wither overwrite and return the string. If
@@ -107,107 +108,99 @@ void ensureRegexIsConstantAndCompatible(
 // If position <= 0, throw error.
 // If position > length string, return string.
 template <typename T>
-struct RegexReplaceFunction {
+struct RegexpReplaceFunction {
   VELOX_DEFINE_FUNCTION_TYPES(T);
 
-  void call(
+  using RegexLRUCache = SimpleLRUCache<std::string, std::shared_ptr<re2::RE2>>;
+
+  RegexpReplaceFunction() : cache_(kMaxCompiledRegexes, 1) {}
+
+  bool call(
       out_type<Varchar>& result,
       const arg_type<Varchar>& stringInput,
       const arg_type<Varchar>& pattern,
       const arg_type<Varchar>& replace) {
-    re2::RE2* patternRegex = getCachedRegex(pattern.str());
-    re2::StringPiece replaceStringPiece = toStringPiece(replace);
-
-    std::string string(stringInput.data(), stringInput.size());
-    RE2::GlobalReplace(&string, *patternRegex, replaceStringPiece);
-
-    if (string.size()) {
-      result.resize(string.size());
-      std::memcpy(result.data(), string.data(), string.size());
-    } else {
-      result.resize(0);
-    }
+    return call(result, stringInput, pattern, replace, 1);
   }
 
-  void call(
+  bool call(
       out_type<Varchar>& result,
       const arg_type<Varchar>& stringInput,
       const arg_type<Varchar>& pattern,
       const arg_type<Varchar>& replace,
       const arg_type<int64_t>& position) {
-    VELOX_USER_CHECK_GE(position, 1, "regex_replace requires a position >= 1");
+    if (position > int(stringInput.size()) + 1) {
+      result = stringInput;
+      return true;
+    }
 
-    re2::RE2* patternRegex = getCachedRegex(pattern.str());
+    VELOX_USER_CHECK_GE(position, 1, "regexp_replace requires a position >= 1");
+    if (stringInput.size() == 0) {
+      if (pattern.size() == 0 && position == 1) {
+        result = replace;
+        return true;
+      }
+      if (pattern.size() > 0) {
+        result = stringInput;
+        return true;
+      }
+    }
+    size_t utf8Position =
+        getUTFLength(stringInput.data(), stringInput.size(), position);
+
+    std::shared_ptr<re2::RE2> patternRegex = getRegex(pattern.str());
     re2::StringPiece replaceStringPiece = toStringPiece(replace);
-    re2::StringPiece inputStringPiece = toStringPiece(stringInput);
 
-    if (position > stringInput.size() + 1) {
-      result.resize(inputStringPiece.size());
-      std::memcpy(
-          result.data(), inputStringPiece.data(), inputStringPiece.size());
-      return;
-    }
 
-    // Adjust the position for UTF-8 by counting the code points.
-    size_t utf8Position = 0;
-    size_t numCodePoints = 0;
-    while (numCodePoints < position - 1 && utf8Position <= stringInput.size()) {
-      int charLength =
-          utf8proc_char_length(inputStringPiece.data() + utf8Position);
-      VELOX_USER_CHECK_GT(
-          charLength, 0, "regex_replace encountered invalid UTF-8 character");
-      ++numCodePoints;
-      utf8Position += charLength;
-    }
     if (utf8Position > stringInput.size() + 1) {
-      result.resize(inputStringPiece.size());
-      std::memcpy(
-          result.data(), inputStringPiece.data(), inputStringPiece.size());
-      return;
+      result = stringInput;
+      return true;
     }
 
-    re2::StringPiece prefix(inputStringPiece.data(), utf8Position);
-    re2::StringPiece targetStringPiece(
-        inputStringPiece.data() + utf8Position,
-        inputStringPiece.size() - utf8Position);
-
+    std::string prefix(stringInput.data(), utf8Position);
     std::string targetString(
-        targetStringPiece.data(), targetStringPiece.size());
+        stringInput.data() + utf8Position, stringInput.size() - utf8Position);
+
     RE2::GlobalReplace(&targetString, *patternRegex, replaceStringPiece);
 
     if (targetString.size() || prefix.size()) {
-      result.resize(prefix.size() + targetString.size());
-      std::memcpy(result.data(), prefix.data(), prefix.size());
-      std::memcpy(
-          result.data() + prefix.size(),
-          targetString.data(),
-          targetString.size());
-    } else {
-      result.resize(0);
+      result = prefix + targetString;
+      return true;
     }
+    return false;
   }
 
  private:
-  re2::RE2* getCachedRegex(const std::string& pattern) const {
-    auto it = patternCache_.find(pattern);
-    if (it != patternCache_.end()) {
-      return it->second.get();
+  std::shared_ptr<re2::RE2> getRegex(const std::string& pattern) const {
+    std::optional<std::shared_ptr<re2::RE2>> cachedRegex = cache_.get(pattern);
+    if (cachedRegex) {
+      return *cachedRegex;
     }
-    VELOX_USER_CHECK_LT(
-        patternCache_.size(),
-        kMaxCompiledRegexes,
-        "regex_replace hit the maximum number of unique regexes: {}",
-        kMaxCompiledRegexes);
-    checkForCompatiblePattern(pattern, "regex_replace");
-    auto patternRegex = std::make_unique<re2::RE2>(pattern);
-    auto* rawPatternRegex = patternRegex.get();
-    checkForBadPattern(*rawPatternRegex);
-    patternCache_.emplace(pattern, std::move(patternRegex));
-    return rawPatternRegex;
+
+    checkForCompatiblePattern(pattern, "regexp_replace");
+    std::shared_ptr<re2::RE2> patternRegex =
+        std::make_shared<re2::RE2>(pattern);
+    checkForBadPattern(*patternRegex.get());
+
+    cache_.add(pattern, patternRegex);
+    return patternRegex;
   }
 
-  mutable folly::F14FastMap<std::string, std::unique_ptr<re2::RE2>>
-      patternCache_;
+  mutable RegexLRUCache cache_;
+
+  size_t getUTFLength(const char* str, size_t len, size_t max_length) {
+    // Adjust the position for UTF-8 by counting the code points.
+    size_t utf8Position = 0;
+    size_t numCodePoints = 0;
+    while (numCodePoints < max_length - 1 && utf8Position <= len) {
+      int charLength = utf8proc_char_length(str + utf8Position);
+      VELOX_USER_CHECK_GT(
+          charLength, 0, "regexp_replace encountered invalid UTF-8 character");
+      ++numCodePoints;
+      utf8Position += charLength;
+    }
+    return utf8Position;
+  }
 };
 
 } // namespace
@@ -236,16 +229,16 @@ std::shared_ptr<exec::VectorFunction> makeRegexExtract(
   return result;
 }
 
-void registerRegexReplace(const std::string& prefix) {
-  registerFunction<RegexReplaceFunction, Varchar, Varchar, Varchar, Varchar>(
-      {prefix + "REGEX_REPLACE"});
+void registerRegexpReplace(const std::string& prefix) {
+  registerFunction<RegexpReplaceFunction, Varchar, Varchar, Varchar, Varchar>(
+      {prefix + "REGEXP_REPLACE"});
   registerFunction<
-      RegexReplaceFunction,
+      RegexpReplaceFunction,
       Varchar,
       Varchar,
       Varchar,
       Varchar,
-      int64_t>({prefix + "REGEX_REPLACE"});
+      int64_t>({prefix + "REGEXP_REPLACE"});
 }
 
 } // namespace facebook::velox::functions::sparksql
